@@ -1,0 +1,27 @@
+# Build outputs
+*.apk
+*.idsig
+Bastogne_modded.apk
+ProCaptain_modded_final_v14.apk
+ProCaptainMod_REFERENCE.apk
+
+# Decompiled watchface directories (regenerated from ZIP)
+Bastogne/
+ProCaptain_extracted/
+source_reference/
+source_modded/
+
+# Keystore (auto-generated if missing)
+release-key.jks
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temp
+temp_*
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
