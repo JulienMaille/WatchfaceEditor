@@ -21,10 +21,19 @@ Toolkit for adding custom color options and hue-shifted backgrounds to Wear OS w
 | `items` | Watchface elements to tint, assigned to groups |
 | `hue_variants` | Generate hue-shifted PNG variants from an existing option |
 
+Each enabled group (or standalone item) becomes a `ColorConfiguration` in the phone app with three preset options and then one per palette color:
+
+| Option ID | Label | Effect |
+|---|---|---|
+| `0` | Hidden | Transparent tint (element becomes invisible) |
+| `1` | Original | Element keeps its original color from the XML |
+| `2+` | *(palette colors)* | Each palette entry becomes a selectable tint |
+
 Per-group palette overrides the global one:
 ```json
 "AOD": { "display_name": "AOD Color", "enabled": true, "palette": ["#ff88ccff", "#ff66ddaa"] }
 ```
+This produces options: Hidden, Original, Light Blue, Blue-Green.
 
 ### Hue Variants
 
