@@ -1,53 +1,55 @@
 # Watchface Editor
 
-A toolkit for adding custom color options to Wear OS watchfaces.
+Toolkit for adding custom color options and hue-shifted backgrounds to Wear OS watchfaces.
 
-## Usage
+## Quick Start
 
 ```powershell
-# Step 1: Decompile APK, scan elements, generate config
+# 1. Decompile, scan, generate config
 .\mod_helper.ps1 -Watchface <name> -Action prepare
 
-# Step 2: Apply mod, build APK, sign, verify
+# 2. Edit tint_config.json, then build & sign
 .\mod_helper.ps1 -Watchface <name> -Action build
-
-# With release signing
-.\mod_helper.ps1 -Watchface <name> -Action build -Release
 ```
 
-**Step 1** extracts the watchface from `<name>.zip`, decompiles it, scans for tintable elements, and generates `tint_config.json`. Edit this file to enable/disable items and assign groups.
+## Config (`tint_config.json`)
 
-**Step 2** applies the tint modifications, builds the APK, zipaligns (4-byte boundary for Android 11+), and signs it.
+| Section | Purpose |
+|---|---|
+| `palette` | Global color list for tint options |
+| `groups` | Named groups that become ColorConfigurations in the phone app |
+| `items` | Watchface elements to tint, assigned to groups |
+| `hue_variants` | Generate hue-shifted PNG variants from an existing option |
 
-## Configuration
+Per-group palette overrides the global one:
+```json
+"AOD": { "display_name": "AOD Color", "enabled": true, "palette": ["#ff88ccff", "#ff66ddaa"] }
+```
 
-`tint_config.json` (per-watchface):
+### Hue Variants
 
 ```json
-{
-  "palette": ["#aarrggbb", ...],
-  "groups": {
-    "Background": { "display_name": "Background", "enabled": true }
-  },
-  "items": {
-    "BG_46bc": {
-      "tag": "PartImage",
-      "path": "Scene/.../PartImage[BG_46bc]",
-      "original_tintColor": null,
-      "enabled": true,
-      "group": "Background"
-    }
-  }
+"hue_variants": {
+  "enabled": true,
+  "list_config_id": "8216757e_...",
+  "source_option": 6,
+  "option_id_start": 10,
+  "shifts": [45, 90, 135, 180, 225, 270, 315]
 }
 ```
 
-Each ColorConfiguration produces options: `id=0` (Hidden), `id=1` (Original), `id=2+` (palette colors).
+Generates hue-rotated PNGs from the source option's images, creates `ListOption` entries with preview icons, and registers everything in `public.xml`/`strings.xml`. Pre-made PNGs in `drawable-nodpi/` following the `_hue{deg}` naming convention skip generation.
 
-## Tools
+### Complication Injection
 
-| Tool | Purpose |
+Original complication slots are preserved. Three additional slots (101–103) are injected at predefined positions using slot 0/1 as templates. Requires `<watchface>/slots_dump.txt` from `extract_slots_full.py`.
+
+## Files
+
+| File | Purpose |
 |---|---|
-| `smart_modder.py` | Applies tint/color configs and injects complications |
+| `smart_modder.py` | Applies tint configs, injects complications, generates hue variants |
 | `scan_tintable.py` | Scans watchface XML for tintable elements |
-| `extract_slots_full.py` | Dumps ComplicationSlot definitions for injection |
-| `mod_helper.ps1` | Automation: decompile, build, sign, verify |
+| `extract_slots_full.py` | Dumps ComplicationSlot definitions to `slots_dump.txt` |
+| `mod_helper.ps1` | Automation: decompile, build, sign (release key), verify |
+| `release-key.jks` | Keystore for APK signing (auto-generated if missing) |

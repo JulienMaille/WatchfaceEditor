@@ -4,7 +4,7 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser(description='Scan watchface XML for tintable elements')
-parser.add_argument('--watchface', help='Watchface name (e.g., ProCaptain, Bastogne). Uses subfolder as input.')
+parser.add_argument('--watchface', help='Watchface name (e.g., MyWatchface). Uses subfolder as input.')
 parser.add_argument('--ref-dir', help='Reference mod directory (to extract palette)')
 parser.add_argument('--orig-dir', help='Original/decompiled watchface directory (to scan)')
 parser.add_argument('--output', help='Output JSON file path (default: <watchface-dir>/tintable_scan.json)')

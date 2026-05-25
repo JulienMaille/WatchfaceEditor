@@ -45,11 +45,11 @@ function Ensure-ReleaseKeystore {
     $ksPath = Join-Path $scriptDir "release-key.jks"
     if (-not (Test-Path $ksPath)) {
         Write-Host "release-key.jks not found. Generating a new one..." -ForegroundColor Yellow
-        & "C:\Program Files\Java\jre1.8.0_491\bin\keytool.exe" -genkey -v -keystore "$ksPath" -keyalg RSA -keysize 2048 -validity 10000 -alias BastogneKey -storepass bastogne2026 -keypass bastogne2026 -dname "CN=WatchfaceEditor, OU=Modding, O=WatchfaceEditor, L=Unknown, ST=Unknown, C=US" 2>&1
+        & "C:\Program Files\Java\jre1.8.0_491\bin\keytool.exe" -genkey -v -keystore "$ksPath" -keyalg RSA -keysize 2048 -validity 10000 -alias WatchfaceKey -storepass watchface2026 -keypass watchface2026 -dname "CN=WatchfaceEditor, OU=Modding, O=WatchfaceEditor, L=Unknown, ST=Unknown, C=US" 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "Generated release-key.jks (alias: BastogneKey, password: bastogne2026)" -ForegroundColor Green
+            Write-Host "Generated release-key.jks" -ForegroundColor Green
         } else {
-            Write-Host "Failed to generate keystore! Fall back to debug signing." -ForegroundColor Red
+            Write-Host "Failed to generate keystore!" -ForegroundColor Red
             return $null
         }
     }
@@ -67,21 +67,15 @@ function Sign-Apk {
     }
     Move-Item -Force "$alignedPath" "$ApkPath"
 
-    if ($Release) {
-        $ksPath = Ensure-ReleaseKeystore
-        if (-not $ksPath) {
-            Write-Host "Falling back to debug signing..." -ForegroundColor Yellow
-            java -jar "$toolsDir\apksigner.jar" sign "$ApkPath"
-        } else {
-            $ksPassArg = if ($KsPass) { "--ks-pass pass:$KsPass" } else { "--ks-pass pass:bastogne2026" }
-            $keyPassArg = if ($KeyPass) { "--key-pass pass:$KeyPass" } else { "--key-pass pass:bastogne2026" }
-            Write-Host "Signing with release key..." -ForegroundColor Cyan
-            java -jar "$toolsDir\apksigner.jar" sign --ks "$ksPath" --ks-key-alias BastogneKey $ksPassArg $keyPassArg "$ApkPath"
-        }
-    } else {
-        Write-Host "Signing with debug key..." -ForegroundColor Cyan
-        java -jar "$toolsDir\apksigner.jar" sign "$ApkPath"
+    $ksPath = Ensure-ReleaseKeystore
+    if (-not $ksPath) {
+        Write-Host "No keystore found, cannot sign!" -ForegroundColor Red
+        exit 1
     }
+    $ksPassArg = if ($KsPass) { "--ks-pass pass:$KsPass" } else { "--ks-pass pass:watchface2026" }
+    $keyPassArg = if ($KeyPass) { "--key-pass pass:$KeyPass" } else { "--key-pass pass:watchface2026" }
+    Write-Host "Signing..." -ForegroundColor Cyan
+    java -jar "$toolsDir\apksigner.jar" sign --ks "$ksPath" --ks-key-alias WatchfaceKey $ksPassArg $keyPassArg "$ApkPath"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Signing complete." -ForegroundColor Green
     } else {
@@ -129,9 +123,9 @@ function SetupWatchface {
 # --- Main ---
 if (-not $Action -or -not $Watchface) {
     Write-Host "Usage: .\mod_helper.ps1 -Watchface <name> -Action <prepare|build>" -ForegroundColor Yellow
-    Write-Host "  prepare   Decompile APK, scan tintable elements, generate config"
-    Write-Host "  build     Apply mod, build APK, sign, and verify"
-    Write-Host "  build -Release   Apply mod, build APK, sign with release key, and verify"
+    Write-Host "  prepare    Decompile, scan, generate tint_config.json"
+    Write-Host "  build      Apply mod, build APK, sign, verify"
+    Write-Host "  build -Release  Build and sign with release key"
     exit
 }
 

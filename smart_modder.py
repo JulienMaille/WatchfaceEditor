@@ -5,6 +5,14 @@ import copy
 import json
 import argparse
 
+try:
+    from PIL import Image
+    import numpy as np
+    HAVE_PIL = True
+except ImportError:
+    HAVE_PIL = False
+    print("Warning: Pillow not installed. Hue variant generation disabled.")
+
 DEFAULT_PALETTE = [
     "#ffffffff", "#ffd0cfd1", "#ffb54cff", "#ff6cbfee",
     "#ff10b1bd", "#ff0084ae", "#ff4f87f1", "#ff779dc1",
@@ -33,19 +41,6 @@ def scan_all_tintable(scene, auto_background=False):
     items = []
     wf_width = None
     wf_height = None
-    root = scene
-    while root is not None:
-        parent = root
-        root = None
-    wf_elem = scene
-    while wf_elem is not None and wf_elem.tag != 'WatchFace':
-        wf_elem = None
-    # Walk up to find WatchFace dimensions
-    parent_map = {}
-    for el in scene.iter():
-        for child in el:
-            parent_map[child] = el
-    # Find width/height from WatchFace or Scene
     for el in scene.iter():
         if el.tag == 'WatchFace':
             w = el.get('width')
@@ -282,9 +277,15 @@ def write_strings_file(strings_dict, strings_xml):
     strings_dict["hidden"] = "Hidden"
     strings_dict["original"] = "Original"
     if "app_name" not in strings_dict:
-        strings_dict["app_name"] = f"{orig_app} Mod" if orig_app else "Watchface Mod"
+        base = orig_app
+        while base and base.endswith(" Mod"):
+            base = base[:-4].strip()
+        strings_dict["app_name"] = f"{base} Mod" if base else "Watchface Mod"
     if "watchface_title" not in strings_dict:
-        strings_dict["watchface_title"] = f"{orig_title} Mod" if orig_title else "Watchface Mod"
+        base = orig_title
+        while base and base.endswith(" Mod"):
+            base = base[:-4].strip()
+        strings_dict["watchface_title"] = f"{base} Mod" if base else "Watchface Mod"
 
     for name, value in strings_dict.items():
         existing = None
@@ -361,13 +362,18 @@ def inject_complex_complications(scene, slots_dump_path):
         print("Warning: No reference slots found.")
         return []
 
+    existing_ids = {int(c.get('slotId')) for c in scene if c.tag == 'ComplicationSlot' and c.get('slotId', '').isdigit()}
     template_0 = next((s for s in ref_slots if s.get('slotId') == '0'), ref_slots[0])
     template_1 = next((s for s in ref_slots if s.get('slotId') == '1'), ref_slots[0])
 
+    new_defs = [(101, 80, 170, template_0),
+                (102, 173, 260, template_1),
+                (103, 260, 170, template_0)]
+
     created = []
-    for new_id, x, y, tmpl in [(101, 80, 170, template_0),
-                                 (102, 173, 260, template_1),
-                                 (103, 260, 170, template_0)]:
+    for new_id, x, y, tmpl in new_defs:
+        if new_id in existing_ids:
+            continue
         slot = copy.deepcopy(tmpl)
         slot.set('slotId', str(new_id))
         slot.set('displayName', f"Complication {new_id}")
@@ -381,9 +387,253 @@ def inject_complex_complications(scene, slots_dump_path):
     return created
 
 
+def hue_degree_name(deg):
+    names = {
+        0: 'Original', 30: 'Amber', 45: 'Orange',
+        60: 'Gold', 90: 'Yellow', 120: 'Chartreuse',
+        135: 'Lime', 150: 'Teal', 180: 'Cyan',
+        210: 'Azure', 225: 'Blue', 240: 'Indigo',
+        270: 'Violet', 300: 'Magenta', 315: 'Pink', 330: 'Rose',
+    }
+    return names.get(deg, f'{deg}\u00b0')
+
+
+def hue_resource_name(res_name, deg):
+    if res_name.endswith('_trimmed'):
+        return res_name.replace('_trimmed', f'_hue{deg}_trimmed')
+    else:
+        return f'{res_name}_hue{deg}'
+
+
+def find_resource_file(drawable_dir, res_name):
+    for ext in ['.png', '.webp', '.jpg']:
+        path = os.path.join(drawable_dir, res_name + ext)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def hue_shift_image(img, degrees):
+    img = img.convert('RGBA')
+    r, g, b, a = img.split()
+    rgb = Image.merge('RGB', (r, g, b))
+    hsv = rgb.convert('HSV')
+    h, s, v = hsv.split()
+    hn = np.array(h, dtype=np.uint16)
+    shift = int(degrees / 360.0 * 256)
+    hn = (hn + shift) % 256
+    h = Image.fromarray(hn.astype(np.uint8), 'L')
+    hsv2 = Image.merge('HSV', (h, s, v))
+    rgb2 = hsv2.convert('RGB')
+    out = Image.new('RGBA', img.size)
+    out.paste(rgb2, (0, 0))
+    out.putalpha(a)
+    return out
+
+
+def generate_hue_png(drawable_dir, old_res, new_res, degrees):
+    src = find_resource_file(drawable_dir, old_res)
+    if src is None:
+        return
+    dst = os.path.join(drawable_dir, new_res + os.path.splitext(src)[1])
+    if os.path.exists(dst):
+        return
+    img = Image.open(src)
+    shifted = hue_shift_image(img, degrees)
+    shifted.save(dst, optimize=True)
+    print(f"    PNG: {new_res}{os.path.splitext(src)[1]}")
+
+
+def generate_style_icon(drawable_dir, list_id, src_opt, new_opt, degrees):
+    style_src = f'style_wfs_{list_id}_{src_opt}'
+    src = find_resource_file(drawable_dir, style_src)
+    if src is None:
+        return
+    style_dst = f'style_wfs_{list_id}_{new_opt}'
+    dst = os.path.join(drawable_dir, style_dst + os.path.splitext(src)[1])
+    if os.path.exists(dst):
+        return
+    img = Image.open(src)
+    shifted = hue_shift_image(img, degrees)
+    shifted.save(dst, optimize=True)
+    print(f"    Style icon: {style_dst}{os.path.splitext(src)[1]}")
+
+
+def register_hue_resources(public_xml_path, options, drawable_dir):
+    if not os.path.exists(public_xml_path):
+        return
+    try:
+        tree = ET.parse(public_xml_path)
+        root = tree.getroot()
+    except Exception:
+        return
+
+    new_drawables = set()
+    for opt_id, deg, name in options:
+        style_name = f'style_wfs_*_{opt_id}'
+        for f in os.listdir(drawable_dir):
+            base = f.replace('.png', '').replace('.webp', '')
+            if f.endswith(f'_hue{deg}.png') or f.endswith(f'_hue{deg}_trimmed.png'):
+                new_drawables.add(base)
+            if f.startswith('style_wfs_') and f.endswith(f'_{opt_id}.png'):
+                new_drawables.add(base)
+
+    for pub in list(root.findall('public')):
+        pname = pub.get('name', '')
+        if pname in new_drawables or pname.startswith('hue_variant_') or '_hue' in pname:
+            root.remove(pub)
+        elif pname.startswith('style_wfs_'):
+            suffix = pname.rsplit('_', 1)[-1]
+            if suffix.isdigit() and int(suffix) >= min(o[0] for o in options):
+                root.remove(pub)
+
+    max_did = max((int(p.get('id', '0x0'), 16) for p in root.findall('public')
+                   if p.get('id', '').startswith('0x7f010')), default=0x7f01007f)
+    max_sid = max((int(p.get('id', '0x0'), 16) for p in root.findall('public')
+                   if p.get('id', '').startswith('0x7f040')), default=0x7f040022)
+
+    next_did = max_did + 1
+    for name in sorted(new_drawables):
+        pub = ET.SubElement(root, 'public')
+        pub.set('type', 'drawable')
+        pub.set('name', name)
+        pub.set('id', f'0x{next_did:08x}')
+        next_did += 1
+
+    next_sid = max_sid + 1
+    for opt_id, deg, name in options:
+        pub = ET.SubElement(root, 'public')
+        pub.set('type', 'string')
+        pub.set('name', f'hue_variant_{opt_id}')
+        pub.set('id', f'0x{next_sid:08x}')
+        next_sid += 1
+
+    if hasattr(ET, 'indent'):
+        ET.indent(tree, space="    ", level=0)
+    tree.write(public_xml_path, encoding='UTF-8', xml_declaration=True)
+    print(f"  Registered {len(new_drawables)} drawables + {len(options)} strings in public.xml")
+
+
+def generate_hue_variants(root, tint_config, input_dir, new_strings):
+    hv = tint_config.get('hue_variants', {})
+    if not hv or not hv.get('enabled', True):
+        return
+
+    if not HAVE_PIL:
+        print("Cannot generate hue variants: Pillow not installed.")
+        return
+
+    list_id = hv.get('list_config_id', '')
+    source_opt = str(hv.get('source_option', 0))
+    shifts = hv.get('shifts', [])
+    start_opt = hv.get('option_id_start', 100)
+    drawable_dir = os.path.join(input_dir, 'res', 'drawable-nodpi')
+    public_xml_path = os.path.join(input_dir, 'res', 'values', 'public.xml')
+
+    if not list_id:
+        print("  No list_config_id for hue_variants, skipping.")
+        return
+    if not shifts:
+        shifts = list(range(0, 360, 45))
+
+    options = []
+    for i, s in enumerate(shifts):
+        if isinstance(s, (int, float)):
+            deg = int(s) % 360
+            opt_id = start_opt + i
+            name = hue_degree_name(deg)
+        else:
+            deg = int(s.get('deg', i * 45)) % 360
+            opt_id = s.get('id', start_opt + i)
+            name = s.get('name', hue_degree_name(deg))
+        options.append((opt_id, deg, name))
+
+    print(f"\n=== Hue variants: {len(options)} shifts from option {source_opt} ===")
+
+    lc_blocks = root.findall(f".//ListConfiguration[@id='{list_id}']")
+    if not lc_blocks:
+        print(f"  WARNING: no ListConfigurations for id '{list_id}'")
+        return
+    print(f"  Found {len(lc_blocks)} ListConfiguration blocks")
+
+    # Build parent map once
+    pm = {c: p for p in root.iter() for c in p}
+
+    for opt_id, deg, name in options:
+        str_key = f"hue_variant_{opt_id}"
+        if str_key not in new_strings:
+            new_strings[str_key] = name
+
+        for lc in lc_blocks:
+            if any(lo.get('id') == str(opt_id) for lo in lc.findall('ListOption')):
+                continue
+
+            source_lo = next((lo for lo in lc.findall('ListOption')
+                             if lo.get('id') == source_opt), None)
+            if source_lo is None:
+                continue
+
+            cur = lc
+            is_scene = False
+            group_name = None
+            while cur in pm:
+                cur = pm[cur]
+                if cur.tag == 'Scene':
+                    is_scene = True
+                if cur.tag == 'Group' and cur.get('name') and group_name is None:
+                    group_name = cur.get('name')
+
+            new_lo = ET.SubElement(lc, 'ListOption')
+            new_lo.set('id', str(opt_id))
+            str_key = f"hue_variant_{opt_id}"
+            new_lo.set('displayName', str_key)
+            new_lo.set('screenReaderText', str_key)
+            new_lo.set('icon', f'style_wfs_{list_id}_{opt_id}')
+
+            source_pi = source_lo.find('PartImage')
+            if source_pi is None:
+                continue
+
+            new_pi = ET.SubElement(new_lo, 'PartImage')
+            for k, v in source_pi.attrib.items():
+                new_pi.set(k, v)
+
+            source_img = source_pi.find('Image')
+            source_imgs = source_pi.find('Images')
+
+            if source_img is not None:
+                old_res = source_img.get('resource', '')
+                new_res = hue_resource_name(old_res, deg)
+                ET.SubElement(new_pi, 'Image').set('resource', new_res)
+                if is_scene:
+                    print(f"    GEN {old_res} -> {new_res}")
+                    generate_hue_png(drawable_dir, old_res, new_res, deg)
+                else:
+                    print(f"    SKIP (not scene) {old_res}")
+            elif source_imgs is not None:
+                new_imgs = ET.SubElement(new_pi, 'Images')
+                new_imgs.set('change', source_imgs.get('change', 'TAP'))
+                for si in source_imgs.findall('Image'):
+                    old_res = si.get('resource', '')
+                    new_img = ET.SubElement(new_imgs, 'Image')
+                    if any(kw in old_res.lower() for kw in ['_off', '_shadow', '_base']):
+                        new_img.set('resource', old_res)
+                    else:
+                        new_res = hue_resource_name(old_res, deg)
+                        new_img.set('resource', new_res)
+                        if is_scene:
+                            print(f"    GEN {old_res} -> {new_res}")
+                            generate_hue_png(drawable_dir, old_res, new_res, deg)
+
+        generate_style_icon(drawable_dir, list_id, source_opt, opt_id, deg)
+        print(f"  Option {opt_id}: {name} (hue +{deg}\u00b0)")
+
+    register_hue_resources(public_xml_path, options, drawable_dir)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Watchface Color Modder')
-    parser.add_argument('--watchface', help='Watchface name (e.g., ProCaptain, Bastogne). Uses subfolder as input dir.')
+    parser.add_argument('--watchface', help='Watchface name (e.g., MyWatchface). Uses subfolder as input dir.')
     parser.add_argument('--input-dir', help='Input directory containing res/raw/watchface.xml (overrides --watchface)')
     parser.add_argument('--package-name', help='New package name for the modded APK')
     parser.add_argument('--auto-background', action='store_true', help='Auto-detect background elements by position/size')
@@ -487,7 +737,8 @@ def main():
             main_string_id = f"{config_id}_title"
             new_strings[main_string_id] = display
             continue
-        cfg = create_color_config(config_id, display, config_id, new_strings, None, palette)
+        group_palette = group_info.get('palette', palette)
+        cfg = create_color_config(config_id, display, config_id, new_strings, None, group_palette)
         user_configs.append(cfg)
         created_configs[config_id] = True
         group_config_ids[group_name] = config_id
@@ -535,30 +786,33 @@ def main():
     print(f"Applied tint to {applied_count} items.")
 
     if not args.no_complications:
-        for child in list(scene):
-            if child.tag == 'ComplicationSlot':
-                scene.remove(child)
-
         new_comps = inject_complex_complications(scene, slots_dump_path)
-
-        analog_clock_idx = None
-        for i, child in enumerate(scene):
-            if child.tag == 'Group':
-                for desc in child.iter():
-                    if desc.tag in ('HourHand', 'MinuteHand', 'SecondHand', 'AnalogClock'):
-                        analog_clock_idx = i
+        if new_comps:
+            analog_clock_idx = None
+            for i, child in enumerate(scene):
+                if child.tag == 'Group':
+                    for desc in child.iter():
+                        if desc.tag in ('HourHand', 'MinuteHand', 'SecondHand', 'AnalogClock'):
+                            analog_clock_idx = i
+                            break
+                    if analog_clock_idx is not None:
                         break
-                if analog_clock_idx is not None:
-                    break
 
-        if analog_clock_idx is not None:
+            insert_idx = analog_clock_idx if analog_clock_idx is not None else len(scene)
+            last_comp_idx = -1
+            for i, child in enumerate(scene):
+                if child.tag == 'ComplicationSlot':
+                    last_comp_idx = i
+            insert_idx = last_comp_idx + 1 if last_comp_idx >= 0 else insert_idx
+
             for j, comp in enumerate(new_comps):
-                scene.insert(analog_clock_idx + j, comp)
+                scene.insert(insert_idx + j, comp)
         else:
-            for comp in new_comps:
-                scene.append(comp)
+            print("No reference slots - keeping original complications.")
     else:
         print("Complication injection skipped.")
+
+    generate_hue_variants(root, tint_config, input_dir, new_strings)
 
     if not args.no_manifest:
         update_manifest_package(manifest_xml, new_package_name)

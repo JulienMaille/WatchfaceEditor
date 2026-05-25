@@ -5,6 +5,9 @@ Bastogne_modded.apk
 ProCaptain_modded_final_v14.apk
 ProCaptainMod_REFERENCE.apk
 
+# Watchface ZIP downloads (original APK archives)
+*+*.zip
+
 # Decompiled watchface directories (regenerated from ZIP)
 Bastogne/
 ProCaptain_extracted/
